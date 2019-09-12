@@ -1,4 +1,4 @@
-package com.wlf.translateprovider.javabean;
+package com.wlf.translateprovider.javabean.iat;
 
 public class Decoder {
     private Text[] texts;

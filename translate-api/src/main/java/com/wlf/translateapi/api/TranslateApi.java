@@ -13,16 +13,20 @@ public interface TranslateApi {
     @RequestMapping("/translateText")
     CommonResponse translateText(@RequestBody TranslateTextRequest request);
 
-    @RequestMapping("/listen")
-    CommonResponse listen(@RequestParam(value = "file") MultipartFile file);
+    @RequestMapping("/iat")
+    CommonResponse iat(@RequestParam(value = "file") MultipartFile file,
+                       @RequestParam(value = "from") String from,
+                       @RequestParam(value = "appId") String appId,
+                       @RequestParam(value = "userId") String userId);
 
     @RequestMapping("/tts")
     CommonResponse tts(@RequestBody TtsRequest ttsRequest);
 
     @RequestMapping("/translateAudio")
     CommonResponse translateAudio(@RequestParam(value = "file") MultipartFile file,
-                                  @RequestParam(value = "userId", required = false) String userId,
+                                  @RequestParam(value = "userId") String userId,
                                   @RequestParam(value = "userName", required = false) String userName,
                                   @RequestParam(value = "from") String from,
-                                  @RequestParam(value = "to") String to);
+                                  @RequestParam(value = "to") String to,
+                                  @RequestParam(value = "appId") String appId);
 }

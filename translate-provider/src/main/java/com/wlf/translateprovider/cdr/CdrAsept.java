@@ -1,5 +1,6 @@
 package com.wlf.translateprovider.cdr;
 
+import com.wlf.translateprovider.javabean.ots.TranslateCdr;
 import com.wlf.translateprovider.utils.IPUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -27,17 +28,21 @@ public class CdrAsept {
         long startTime = System.currentTimeMillis();
         String startDate = SF.format(new Date(startTime));
 
-        Object result = joinPoint.proceed();
-
-        long endTime = System.currentTimeMillis();
-
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         HttpServletRequest httpServletRequest = attributes.getRequest();
         String localIp = IPUtil.getLocalIp();
         String remoteIp = IPUtil.getRemoteIp(httpServletRequest);
+        TranslateCdr cdr = new TranslateCdr();
+        cdr.setRemoteIp(remoteIp);
+        CdrThreadLocal.setTranslateCdr(cdr);
 
-        log.error(CDR_FORMAT, CdrThreadLocal.getTranslateCdr().getCdrType(), startDate, endTime - startTime, remoteIp, localIp, CdrThreadLocal.getTranslateCdr().getUserId(), CdrThreadLocal.getTranslateCdr().getUserName(), CdrThreadLocal.getTranslateCdr().getResultCode());
-        CdrThreadLocal.delThreadLocal();
+        Object result = joinPoint.proceed();
+
+        long endTime = System.currentTimeMillis();
+        cdr = CdrThreadLocal.getTranslateCdr();
+        if (cdr != null) {
+            log.error(CDR_FORMAT, CdrThreadLocal.getTranslateCdr().getCdrType(), startDate, endTime - startTime, remoteIp, localIp, CdrThreadLocal.getTranslateCdr().getUserId(), CdrThreadLocal.getTranslateCdr().getUserName(), CdrThreadLocal.getTranslateCdr().getResultCode());
+        }
         return result;
     }
 }

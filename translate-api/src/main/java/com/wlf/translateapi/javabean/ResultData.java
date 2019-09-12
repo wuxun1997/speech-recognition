@@ -11,11 +11,11 @@ import java.io.Serializable;
 @NoArgsConstructor
 @Getter
 @Setter
-public class CommonResponse implements Serializable {
+public class ResultData implements Serializable {
 
-    private String code;
+    private String result;
 
-    private String message;
+    private String source;
 
-    private ResultData data;
+    private String filePath;
 }

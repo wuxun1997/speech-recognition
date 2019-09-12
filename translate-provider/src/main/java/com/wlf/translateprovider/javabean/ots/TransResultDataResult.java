@@ -1,4 +1,4 @@
-package com.wlf.translateprovider.javabean;
+package com.wlf.translateprovider.javabean.ots;
 
 public class TransResultDataResult {
 

@@ -13,6 +13,8 @@ import java.io.Serializable;
 @Setter
 public class TranslateTextRequest implements Serializable {
 
+    private String appId;
+
     private String userId;
 
     private String userName;
@@ -22,4 +24,6 @@ public class TranslateTextRequest implements Serializable {
     private String to;
 
     private String data;
+
+    private String isComposeVoice;
 }

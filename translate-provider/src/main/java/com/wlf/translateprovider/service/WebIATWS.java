@@ -2,9 +2,10 @@ package com.wlf.translateprovider.service;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.wlf.translateprovider.javabean.Decoder;
-import com.wlf.translateprovider.javabean.ListenResponseData;
-import com.wlf.translateprovider.javabean.Text;
+import com.wlf.translateapi.javabean.ResultData;
+import com.wlf.translateprovider.javabean.iat.Decoder;
+import com.wlf.translateprovider.javabean.iat.ListenResponseData;
+import com.wlf.translateprovider.javabean.iat.Text;
 import com.wlf.translateapi.javabean.CommonResponse;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Response;
@@ -31,16 +32,18 @@ public class WebIATWS extends WebSocketListener {
     private String appId;
     private CommonResponse listenResult;
     private CountDownLatch countDownLatch;
+    private String from;
 
     Decoder decoder = new Decoder();
     Date dateBegin = new Date();
     Date dateEnd = null;
 
-    public WebIATWS(String fullFileName, String appId, CommonResponse listenResult, CountDownLatch countDownLatch) {
+    public WebIATWS(String fullFileName, String appId, CommonResponse listenResult, CountDownLatch countDownLatch, String from) {
         this.fullFileName = fullFileName;
         this.appId = appId;
         this.listenResult = listenResult;
         this.countDownLatch = countDownLatch;
+        this.from = from;
     }
 
     @Override
@@ -68,7 +71,7 @@ public class WebIATWS extends WebSocketListener {
                             // 填充common
                             common.addProperty("app_id", appId);
                             //填充business
-                            business.addProperty("language", "zh_cn");
+                            business.addProperty("language", from.equals("cn") ? "zh_cn" : "en_us");
                             business.addProperty("domain", "iat");
                             business.addProperty("accent", "mandarin");
                             //business.addProperty("nunum", 0);
@@ -99,7 +102,7 @@ public class WebIATWS extends WebSocketListener {
                             data1.addProperty("audio", Base64.getEncoder().encodeToString(Arrays.copyOf(buffer, len)));
                             frame1.add("data", data1);
                             webSocket.send(frame1.toString());
-                            System.out.println("send continue");
+                            log.info("send continue, request: {}", frame1.toString());
                             break;
                         case StatusLastFrame:    // 最后一帧音频status = 2 ，标志音频发送结束
                             JsonObject frame2 = new JsonObject();
@@ -110,15 +113,11 @@ public class WebIATWS extends WebSocketListener {
                             data2.addProperty("encoding", "raw");
                             frame2.add("data", data2);
                             webSocket.send(frame2.toString());
-                            System.out.println("sendlast");
+                            log.info("final send, request: {}", frame2.toString());
                             break end;
                     }
                 }
-                System.out.println("all data is send");
-            } catch (FileNotFoundException e) {
-                log.error("call onOpen failed, error :{}", e.getMessage());
-            } catch (IOException e) {
-                log.error("call onOpen failed, error :{}", e.getMessage());
+                log.info("all data is send");
             } catch (Exception e) {
                 log.error("call onOpen failed, error :{}", e.getMessage());
             }
@@ -129,40 +128,35 @@ public class WebIATWS extends WebSocketListener {
     public void onMessage(WebSocket webSocket, String text) {
         Gson json = new Gson();
         super.onMessage(webSocket, text);
-        System.out.println(text);
+        log.info("text: {}", text);
         ListenResponseData resp = json.fromJson(text, ListenResponseData.class);
         if (resp != null) {
             if (resp.getCode() != 0) {
-                System.out.println("code=>" + resp.getCode() + " error=>" + resp.getMessage() + " sid=" + resp.getSid());
+                log.error("code=> :{}, error=> :{}, sid= :{}", resp.getCode(), resp.getMessage(), resp.getSid());
                 return;
             }
             if (resp.getData() != null) {
                 if (resp.getData().getResult() != null) {
                     Text te = resp.getData().getResult().getText();
-                    System.out.println(te.toString());
+                    log.info(te.toString());
                     try {
                         decoder.decode(te);
-                        System.out.println("中间识别结果 ==》" + decoder.toString());
+                        log.info("中间识别结果 ==》{}", decoder.toString());
                     } catch (Exception e) {
                         log.error("call onMessage failed, error :{}", e.getMessage());
                     }
                 }
                 if (resp.getData().getStatus() == 2) {
-                    // todo  resp.data.status ==2 说明数据全部返回完毕，可以关闭连接，释放资源
-                    System.out.println("session end ");
+                    log.info("session end ");
                     dateEnd = new Date();
-                    System.out.println(sdf.format(dateBegin) + "开始");
-                    System.out.println(sdf.format(dateEnd) + "结束");
-                    System.out.println("耗时:" + (dateEnd.getTime() - dateBegin.getTime()) + "ms");
-                    System.out.println("最终识别结果 ==》" + decoder.toString());
-                    listenResult.setResult(decoder.toString());
+                    log.info("cost time: {} ms", dateEnd.getTime() - dateBegin.getTime());
+                    log.info("最终识别结果 ==》{}", decoder.toString());
+                    ResultData data = new ResultData();
+                    data.setResult(decoder.toString());
+                    listenResult.setData(data);
                     countDownLatch.countDown();
-                    System.out.println("本次识别sid ==》" + resp.getSid());
                     decoder.discard();
                     webSocket.close(1000, "");
-                } else {
-                    // todo 根据返回的数据处理
-
                 }
             }
         }
@@ -175,15 +169,9 @@ public class WebIATWS extends WebSocketListener {
             if (null != response) {
                 int code = response.code();
                 log.error("call listen faild, code:{}", code);
-                System.out.println("onFailure code:" + code);
-                System.out.println("onFailure body:" + response.body().string());
-                if (101 != code) {
-                    System.out.println("connection failed");
-                    System.exit(0);
-                }
+                log.error("onFailure body:{}", response.body().string());
             }
         } catch (IOException e) {
-            // TODO Auto-generated catch block
             log.error("call onFailure failed, error: {}", e.getMessage());
         }
     }

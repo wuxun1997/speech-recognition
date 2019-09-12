@@ -13,5 +13,11 @@ import java.io.Serializable;
 @Setter
 public class TtsRequest implements Serializable {
 
+    private String userId;
+
+    private String appId;
+
+    private String to;
+
     private String ttsText;
 }

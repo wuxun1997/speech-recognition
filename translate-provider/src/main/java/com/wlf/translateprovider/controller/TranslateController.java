@@ -12,29 +12,27 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 public class TranslateController implements TranslateApi {
 
-    @Autowired
-    private TranslateService translateService;
-
-    @Override
-    public CommonResponse translateText(TranslateTextRequest request) {
-        return translateService.translateText(request);
-    }
-
-    @Override
-    public CommonResponse listen(MultipartFile file) {
-        return translateService.listen(file);
-    }
-
-    @Override
-    public CommonResponse tts(TtsRequest ttsRequest) {
-        return translateService.tts(ttsRequest);
-    }
-
-    @Override
-    public CommonResponse translateAudio(MultipartFile file, String userId, String userName,
-                                         String from, String to) {
-        return translateService.translateAudio(file, userId, userName, from, to);
-    }
+        @Autowired
+        private TranslateService translateService;
 
 
+        @Override
+        public CommonResponse translateText(TranslateTextRequest request) {
+            return translateService.translateText(request);
+        }
+
+        @Override
+        public CommonResponse iat(MultipartFile file, String from, String appId, String userId) {
+            return translateService.iat(file, from, appId, userId);
+        }
+
+        @Override
+        public CommonResponse tts(TtsRequest ttsRequest) {
+            return translateService.tts(ttsRequest);
+        }
+
+        @Override
+        public CommonResponse translateAudio(MultipartFile file, String userId, String userName, String from, String to, String appId) {
+            return translateService.translateAudio(file, userId, userName, from, to, appId);
+        }
 }

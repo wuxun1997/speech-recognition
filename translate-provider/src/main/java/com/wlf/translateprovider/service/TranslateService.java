@@ -2,12 +2,12 @@ package com.wlf.translateprovider.service;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.wlf.translateprovider.javabean.TransResult;
-import com.wlf.translateprovider.javabean.TranslateCdr;
+import com.wlf.translateapi.javabean.ResultData;
+import com.wlf.translateprovider.javabean.AppInfo;
+import com.wlf.translateprovider.javabean.ots.TransResult;
+import com.wlf.translateprovider.javabean.ots.TranslateCdr;
 import com.wlf.translateprovider.cdr.CdrThreadLocal;
-import com.wlf.translateprovider.utils.FileUtil;
-import com.wlf.translateprovider.utils.HttpUtil;
-import com.wlf.translateprovider.utils.ResultCode;
+import com.wlf.translateprovider.utils.*;
 import com.wlf.translateapi.javabean.CommonResponse;
 import com.wlf.translateapi.javabean.TranslateTextRequest;
 import com.wlf.translateapi.javabean.TtsRequest;
@@ -34,41 +34,17 @@ import org.apache.commons.codec.binary.Base64;
 @Service
 public class TranslateService {
 
-    // 应用ID
-    @Value("${appId}")
-    private String appId;
+    // 语音识别接口地址
+    @Value("${iat_url}")
+    private String iat_url;
 
-    // OTS webapi 接口地址
-    @Value("${webOTSUrl}")
-    private String webOTSUrl;
+    // 语音合成接口地址
+    @Value("${tts_url}")
+    private String tts_url;
 
-    // 翻译接口APIKey
-    @Value("${tranlator_apiKey}")
-    private String translator_apiKey;
-
-    // 翻译接口APISercet
-    @Value("${tranlator_apiSecret}")
-    private String translator_apiSecret;
-
-    // IAT webapi 接口地址
-    @Value("${webIATUrl}")
-    private String webIATUrl;
-
-    // 翻译接口APIKey
-    @Value("${listen_apiKey}")
-    private String listen_apiKey;
-
-    // 翻译接口APISercet
-    @Value("${listen_apiSecret}")
-    private String listen_apiSecret;
-
-    // IAT webapi 接口地址
-    @Value("${webTTSUrl}")
-    private String webTTSUrl;
-
-    // 翻译接口APIKey
-    @Value("${tts_apiKey}")
-    private String tts_apiKey;
+    // 翻译接口地址
+    @Value("${ots_url}")
+    private String ots_url;
 
     // 语音识别音频存放路径
     @Value("${iat_filePath}")
@@ -81,6 +57,12 @@ public class TranslateService {
     // 对外合成音频路径
     @Value("${tts_prefix}")
     private String tts_prefix;
+
+    // 白名单列表
+    @Value("${white_ips}")
+    private String white_ips;
+
+    final OkHttpClient client = new OkHttpClient.Builder().build();
 
     // 音频编码(raw合成的音频格式pcm、wav,lame合成的音频格式MP3)
     private static final String AUE = "raw";
@@ -95,45 +77,75 @@ public class TranslateService {
     // 发音人（登陆开放平台https://www.xfyun.cn/后--我的应用（必须为webapi类型应用）--添加在线语音合成（已添加的不用添加）--发音人管理---添加发音人--修改发音人参数）
     private static final String VOICE_NAME = "xiaoyan";
     // 引擎类型
-    private static final String ENGINE_TYPE = "intp65_en";
+    private static final String ENGINE_TYPE_EN = "intp65_en";
+    private static final String ENGINE_TYPE_CN = "intp65";
     // 文本类型（webapi是单次只支持1000个字节，具体看您的编码格式，计算一下具体支持多少文字）
     private static final String TEXT_TYPE = "text";
 
-    public CommonResponse translateAudio(MultipartFile file, String userId, String userName, String from, String to) {
-        CountDownLatch countDownLatch = new CountDownLatch(1);
+    public CommonResponse translateAudio(MultipartFile file, String userId, String userName, String from, String to,
+                                         String appId) {
+        CountDownLatch iatCountDown = new CountDownLatch(1);
         CommonResponse result = new CommonResponse();
         result.setCode(ResultCode.TRANSLATOR_FAILED.getCode());
         result.setMessage(ResultCode.TRANSLATOR_FAILED.getMessage());
 
         // 记话单
-        TranslateCdr translateCdr = new TranslateCdr();
-        translateCdr.setCdrType("4");
-        translateCdr.setUserId(userId != null ? userId : "");
-        translateCdr.setUserName(userName != null ? userName : "");
+        TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
+        translateCdr.setCdrType("1");
+        translateCdr.setUserId(userId);
+        translateCdr.setUserName(userName);
+        translateCdr.setFrom(from);
+        translateCdr.setTo(to);
 
         try {
-            // 先语音识别
-            doVoiceRecognize(countDownLatch, file, result);
+            // 白名单校验
+            if (checkIp(translateCdr.getRemoteIp())) {
+                result.setCode(ResultCode.IP_ERROR.getCode());
+                result.setMessage(ResultCode.IP_ERROR.getMessage());
+                return result;
+            }
 
-            // 再翻译
+            // 构造翻译请求消息体
             TranslateTextRequest request = new TranslateTextRequest();
+            request.setAppId(appId);
             request.setFrom(from);
             request.setTo(to);
             request.setUserId(userId);
             request.setUserName(userName);
-            result.setFrom(result.getResult());
-            request.setData(result.getResult());
+
+            // 校验入参
+            if (checkOTSRequestParam(request)) {
+                result.setCode(ResultCode.PARAM_ERROR.getCode());
+                result.setMessage(ResultCode.PARAM_ERROR.getMessage());
+                return result;
+            }
+
+            // 先语音识别
+            doIat(file, result, iatCountDown, from, appId, userId);
+            if (!ResultCode.SUCCESS.getCode().equals(result.getCode())) {
+                return result;
+            }
+
+            // 再翻译
+            request.setData(result.getData().getResult());
+            result.getData().setSource(result.getData().getResult());
             doTranslate(request, result);
+            if (!ResultCode.SUCCESS.getCode().equals(result.getCode())) {
+                return result;
+            }
 
             // 最后合成
-            TtsRequest ttsRequest = new TtsRequest(result.getResult());
+            TtsRequest ttsRequest = new TtsRequest();
+            ttsRequest.setAppId(appId);
+            ttsRequest.setTo(to);
+            ttsRequest.setTtsText(result.getData().getResult());
+            ttsRequest.setUserId(userId);
             doTts(ttsRequest, result);
         } catch (Exception e) {
             log.error("call translate failed, error: {}", e.getMessage());
             e.printStackTrace();
         } finally {
             translateCdr.setResultCode(result.getCode());
-            CdrThreadLocal.setTranslateCdr(translateCdr);
         }
 
         return result;
@@ -145,37 +157,52 @@ public class TranslateService {
         result.setMessage(ResultCode.TTS_FAILED.getMessage());
 
         // 记话单
-        TranslateCdr translateCdr = new TranslateCdr();
-        translateCdr.setCdrType("3");
+        TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
+        translateCdr.setCdrType("4");
+        translateCdr.setUserId(ttsRequest.getUserId());
+        translateCdr.setTo(ttsRequest.getTo());
 
         try {
+            // 白名单校验
+            if (checkIp(translateCdr.getRemoteIp())) {
+                result.setCode(ResultCode.IP_ERROR.getCode());
+                result.setMessage(ResultCode.IP_ERROR.getMessage());
+                return result;
+            }
             doTts(ttsRequest, result);
         } catch (Exception e) {
             log.error("call tts failed, error :{}", e.getMessage());
         } finally {
             translateCdr.setResultCode(result.getCode());
-            CdrThreadLocal.setTranslateCdr(translateCdr);
         }
 
         return result;
     }
 
-    public CommonResponse listen(MultipartFile file) {
-        CountDownLatch countDownLatch = new CountDownLatch(1);
+    public CommonResponse iat(MultipartFile file, String from, String appId, String userId) {
+        CountDownLatch iatCountDown = new CountDownLatch(1);
         CommonResponse result = new CommonResponse();
-        result.setCode(ResultCode.UPLOAD_FAILED.getCode());
-        result.setMessage(ResultCode.UPLOAD_FAILED.getMessage());
+        result.setCode(ResultCode.IAT_FAILED.getCode());
+        result.setMessage(ResultCode.IAT_FAILED.getMessage());
 
         // 记话单
-        TranslateCdr translateCdr = new TranslateCdr();
-        translateCdr.setCdrType("2");
+        TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
+        translateCdr.setCdrType("3");
+        translateCdr.setFrom(from);
+        translateCdr.setUserId(userId);
+
         try {
-            doVoiceRecognize(countDownLatch, file, result);
+            // 白名单校验
+            if (checkIp(translateCdr.getRemoteIp())) {
+                result.setCode(ResultCode.IP_ERROR.getCode());
+                result.setMessage(ResultCode.IP_ERROR.getMessage());
+                return result;
+            }
+            doIat(file, result, iatCountDown, from, appId, userId);
         } catch (Exception e) {
             log.error("call listen failed, error : {}", e.getMessage());
         } finally {
             translateCdr.setResultCode(result.getCode());
-            CdrThreadLocal.setTranslateCdr(translateCdr);
         }
 
         return result;
@@ -187,35 +214,48 @@ public class TranslateService {
         result.setMessage(ResultCode.TRANSLATOR_FAILED.getMessage());
 
         // 记话单
-        TranslateCdr translateCdr = new TranslateCdr();
-        translateCdr.setCdrType("1");
-        translateCdr.setUserId(request.getUserId() != null ? request.getUserId() : "");
-        translateCdr.setUserName(request.getUserName() != null ? request.getUserName() : "");
+        TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
+        translateCdr.setCdrType("2");
+        translateCdr.setUserId(request.getUserId());
+        translateCdr.setUserName(request.getUserName());
+        translateCdr.setFrom(request.getFrom());
+        translateCdr.setTo(request.getTo());
 
         try {
+            // 白名单校验
+            if (checkIp(translateCdr.getRemoteIp())) {
+                result.setCode(ResultCode.IP_ERROR.getCode());
+                result.setMessage(ResultCode.IP_ERROR.getMessage());
+                return result;
+            }
             doTranslate(request, result);
         } catch (Exception e) {
             log.error("call translator failed, error: {}", e.getMessage());
         } finally {
             translateCdr.setResultCode(result.getCode());
-            CdrThreadLocal.setTranslateCdr(translateCdr);
         }
         return result;
     }
 
     private void doTts(TtsRequest ttsRequest, CommonResponse result) {
         // 校验入参
-        if (ttsRequest == null || ttsRequest.getTtsText() == null || "".equals(ttsRequest.getTtsText().trim())) {
-            log.error("tts param text is null.");
+        if (checkTtsRequest(ttsRequest)) {
             result.setCode(ResultCode.PARAM_ERROR.getCode());
             result.setMessage(ResultCode.PARAM_ERROR.getMessage());
+            return;
+        }
+
+        // 获取应用信息
+        AppInfo appInfo = AppUtil.getApp(ttsRequest.getAppId());
+        if (appInfo == null) {
+            log.error("appInfo is null.");
             return;
         }
 
         // 构造消息头
         Map<String, String> header = null;
         try {
-            header = buildHttpHeader(appId, tts_apiKey);
+            header = buildHttpHeader(ttsRequest.getAppId(), appInfo.getTtsKey(), ttsRequest.getTo());
         } catch (Exception e) {
             log.error("buildHttpHeader failed, error :{}", e.getMessage());
             return;
@@ -224,8 +264,8 @@ public class TranslateService {
         // 调用讯飞合成语音接口
         Map<String, Object> resultMap = null;
         try {
-            resultMap = HttpUtil.doPost2(webTTSUrl, header, "text=" + URLEncoder.encode(ttsRequest.getTtsText(), "utf-8"));
-            System.out.println("占用内存大小： " + URLEncoder.encode(ttsRequest.getTtsText(), "utf-8").getBytes().length);
+            resultMap = HttpUtil.doPost2(tts_url, header, "text=" + URLEncoder.encode(ttsRequest.getTtsText(), "utf-8"));
+            log.info("占用内存大小： {}", URLEncoder.encode(ttsRequest.getTtsText(), "utf-8").getBytes().length);
         } catch (Exception e) {
             log.error("call tts failed, error : {}", e.getMessage());
             return;
@@ -236,38 +276,55 @@ public class TranslateService {
         if ("audio/mpeg".equals(resultMap.get("Content-Type"))) { // 合成成功
             if ("raw".equals(AUE)) {
                 fileName = resultMap.get("sid") + ".wav";
-                fullFilePath = FileUtil.save(tts_filePath, fileName, (byte[]) resultMap.get("body"));
-                log.info("call tts success, file : {}", fullFilePath);
-                System.out.println("合成 WebAPI 调用成功，音频保存位置：" + fullFilePath);
+                fullFilePath = FileUtil.save(tts_filePath + File.separator + ttsRequest.getUserId(), fileName, (byte[]) resultMap.get("body"));
+                log.info("合成 WebAPI 调用成功，音频保存位置：{}", fullFilePath);
             } else {
                 fileName = resultMap.get("sid") + ".mp3";
-                fullFilePath = FileUtil.save(tts_filePath, fileName, (byte[]) resultMap.get("body"));
-                log.info("call tts success, file : {}", fullFilePath);
-                System.out.println("合成 WebAPI 调用成功，音频保存位置：" + fullFilePath);
+                fullFilePath = FileUtil.save(tts_filePath + File.separator + ttsRequest.getUserId(), fileName, (byte[]) resultMap.get("body"));
+                log.info("合成 WebAPI 调用成功，音频保存位置：{}", fullFilePath);
             }
         } else { // 合成失败
-            log.error("call tts failed: {}", resultMap.get("body").toString());
             log.error("call tts faild: {}", resultMap.get("body").toString());
-            System.out.println("合成 WebAPI 调用失败，错误信息：" + resultMap.get("body").toString());
+            log.error("合成 WebAPI 调用失败，错误信息：{}", resultMap.get("body").toString());
         }
 
+        // 设置返回对象
+        ResultData data = result.getData();
+        if (data == null) {
+            data = new ResultData();
+        }
+        data.setFilePath(tts_prefix + ttsRequest.getUserId() + "/" + fileName);
+        result.setData(data);
         result.setCode(ResultCode.SUCCESS.getCode());
         result.setMessage(ResultCode.SUCCESS.getMessage());
-        result.setFilePath(tts_prefix + fileName);
     }
 
     private void doTranslate(TranslateTextRequest request, CommonResponse result) {
         // 校验入参
-        if (checkRequest(request)) {
+        if (checkOTSRequestParam(request)) {
             result.setCode(ResultCode.PARAM_ERROR.getCode());
             result.setMessage(ResultCode.PARAM_ERROR.getMessage());
+            return;
+        }
+
+        // 语言与文本校验
+        if (checkLanguage(request.getFrom(), request.getData())) {
+            result.setCode(ResultCode.LANGUAGE_FAILED.getCode());
+            result.setMessage(ResultCode.LANGUAGE_FAILED.getMessage());
+            return;
+        }
+
+        // 获取应用信息
+        AppInfo appInfo = AppUtil.getApp(request.getAppId());
+        if (appInfo == null) {
+            log.error("app info is null.");
             return;
         }
 
         // 构造请求消息体
         String requestBody = null;
         try {
-            requestBody = buildHttpBody(request, appId);
+            requestBody = buildHttpBody(request, request.getAppId());
         } catch (Exception e) {
             log.error("build requestBody failed, error: {}", e.getMessage());
             return;
@@ -276,17 +333,17 @@ public class TranslateService {
         // 构造请求消息头
         Map<String, String> requestHeader = null;
         try {
-            requestHeader = buildHttpHeader(webOTSUrl, translator_apiKey, translator_apiSecret, requestBody);
+            requestHeader = buildHttpHeader(ots_url, appInfo.getApiKey(), appInfo.getApiSecret(), requestBody);
         } catch (Exception e) {
             log.error("build requestHeader failed, error: {}", e.getMessage());
             return;
         }
 
         // 调讯飞翻译接口
-        Map<String, Object> resultMap = HttpUtil.doPost2(webOTSUrl, requestHeader, requestBody);
+        Map<String, Object> resultMap = HttpUtil.doPost2(ots_url, requestHeader, requestBody);
         if (resultMap != null) {
             String resultStr = resultMap.get("body").toString();
-            System.out.println("【OTS WebAPI 接口调用结果】\n" + resultStr);
+            log.info("【OTS WebAPI 接口调用结果】: {}", resultStr);
             Gson json = new Gson();
             TransResult resultData = json.fromJson(resultStr, TransResult.class);
             int code = resultData.getCode();
@@ -298,38 +355,68 @@ public class TranslateService {
                     log.error("call OTS webapi success, but result data is null");
                     return;
                 }
+
+                ResultData data = result.getData();
+                if (data == null) {
+                    data = new ResultData();
+                }
+                data.setSource(request.getData());
+                data.setResult(resultData.getData().getResult().getTrans_result().getDst());
                 result.setCode(ResultCode.SUCCESS.getCode());
                 result.setMessage(ResultCode.SUCCESS.getMessage());
-                result.setResult(resultData.getData().getResult().getTrans_result().getDst());
+                result.setData(data);
+
+                if (request.getIsComposeVoice() != null && request.getIsComposeVoice().equals("1")) {
+                    TtsRequest ttsRequest = new TtsRequest();
+                    ttsRequest.setAppId(request.getAppId());
+                    ttsRequest.setTo(request.getTo());
+                    ttsRequest.setTtsText(data.getResult());
+                    ttsRequest.setUserId(request.getUserId());
+                    doTts(ttsRequest, result);
+                }
             }
         } else {
             log.error("call OTS webapi failed, result is null.");
         }
     }
 
-    private void doVoiceRecognize(CountDownLatch countDownLatch, MultipartFile file, CommonResponse result) throws InterruptedException {
+    private void doIat(MultipartFile file, CommonResponse result, CountDownLatch iatCountDown, String from, String appId, String userId) throws InterruptedException {
+
+        // 校验入参
+        if (checkIATRequest(file, from, appId, userId)) {
+            result.setCode(ResultCode.PARAM_ERROR.getCode());
+            result.setMessage(ResultCode.PARAM_ERROR.getMessage());
+            return;
+        }
+
         // 文件校验
         if (file == null || file.isEmpty() || file.getSize() <= 0) {
-            log.error("file is empty.");
+            result.setCode(ResultCode.UPLOAD_FAILED.getCode());
+            result.setMessage(ResultCode.UPLOAD_FAILED.getMessage());
             return;
         }
 
         // 文件上传
         String fullFileName = null;
         try {
-            fullFileName = uploadFile(file, iat_filePath);
+            fullFileName = uploadFile(file, iat_filePath + File.separator + userId);
         } catch (Exception e) {
             log.error("upload file failed, error: {}", e.getMessage());
             return;
         }
 
-        result.setCode(ResultCode.LISTEN_FAILED.getCode());
-        result.setMessage(ResultCode.LISTEN_FAILED.getMessage());
+        // 获取应用信息
+        AppInfo appInfo = AppUtil.getApp(appId);
+
+        if (appInfo == null) {
+            log.error("appInfo is null.");
+            return;
+        }
 
         // 构建鉴权url
         String authUrl = null;
         try {
-            authUrl = getAuthUrl(webIATUrl, listen_apiKey, listen_apiSecret);
+            authUrl = AppUtil.getAuthUrl(iat_url, appInfo.getApiKey(), appInfo.getApiSecret());
         } catch (Exception e) {
             log.error("build authUrl failed, error:{}", e.getMessage());
             return;
@@ -339,44 +426,15 @@ public class TranslateService {
 
         //将url中的 schema http://和https://分别替换为ws:// 和 wss://
         String url = authUrl.replace("http://", "ws://").replace("https://", "wss://");
-        System.out.println("url===>" + url);
+        log.info("url===>{}", url);
 
         Request request = new Request.Builder().url(url).build();
-        WebSocket webSocket = client.newWebSocket(request, new WebIATWS(fullFileName, appId, result, countDownLatch));
-        countDownLatch.await();
+        WebSocket webSocket = client.newWebSocket(request, new WebIATWS(fullFileName, appId, result, iatCountDown, from));
+        iatCountDown.await();
         result.setCode(ResultCode.SUCCESS.getCode());
         result.setMessage(ResultCode.SUCCESS.getMessage());
     }
 
-
-    private boolean checkRequest(TranslateTextRequest request) {
-
-        if (request == null) {
-            return true;
-        }
-
-        String from = request.getFrom();
-        String to = request.getTo();
-        String data = request.getData();
-
-        if (from == null || "".equals(from.trim())) {
-            log.error("param from is null.");
-            return true;
-        } else if (!from.matches("cn")) {
-            log.error("param from is not cn.");
-            return true;
-        } else if (to == null || "".equals(to.trim())) {
-            log.error("param to is null");
-            return true;
-        } else if (!to.matches("ja|en")) {
-            log.error("param to is not ja or en");
-            return true;
-        } else if (data == null || "".equals(data.trim())) {
-            log.error("param data is null");
-            return true;
-        }
-        return false;
-    }
 
     /**
      * 组装http请求体
@@ -392,10 +450,10 @@ public class TranslateService {
         business.addProperty("from", request.getFrom());
         business.addProperty("to", request.getTo());
         //填充data
-        System.out.println("【OTS WebAPI TEXT字个数：】\n" + request.getData().length());
+        log.info("【OTS WebAPI TEXT字个数：】{}", request.getData().length());
         byte[] textByte = request.getData().getBytes("UTF-8");
         String textBase64 = new String(java.util.Base64.getEncoder().encodeToString(textByte));
-        System.out.println("【OTS WebAPI textBase64编码后长度：】\n" + textBase64.length());
+        log.info("【OTS WebAPI textBase64编码后长度：】{}", textBase64.length());
         data.addProperty("text", textBase64);
         //填充body
         body.add("common", common);
@@ -407,9 +465,10 @@ public class TranslateService {
     /**
      * 组装http请求头
      */
-    private static Map<String, String> buildHttpHeader(String appId, String tts_apiKey) throws UnsupportedEncodingException {
+    private static Map<String, String> buildHttpHeader(String appId, String tts_apiKey, String to) throws UnsupportedEncodingException {
         String curTime = System.currentTimeMillis() / 1000L + "";
-        String param = "{\"auf\":\"" + AUF + "\",\"aue\":\"" + AUE + "\",\"voice_name\":\"" + VOICE_NAME + "\",\"speed\":\"" + SPEED + "\",\"volume\":\"" + VOLUME + "\",\"pitch\":\"" + PITCH + "\",\"engine_type\":\"" + ENGINE_TYPE + "\",\"text_type\":\"" + TEXT_TYPE + "\"}";
+        String param = "{\"auf\":\"" + AUF + "\",\"aue\":\"" + AUE + "\",\"voice_name\":\"" + VOICE_NAME + "\",\"speed\":\"" + SPEED + "\",\"volume\":\"" + VOLUME + "\",\"pitch\":\""
+                + PITCH + "\",\"engine_type\":\"" + ("cn".equals(to) ? ENGINE_TYPE_CN : ENGINE_TYPE_EN) + "\",\"text_type\":\"" + TEXT_TYPE + "\"}";
         String paramBase64 = new String(Base64.encodeBase64(param.getBytes("UTF-8")));
         String checkSum = DigestUtils.md5Hex(tts_apiKey + curTime + paramBase64);
         Map<String, String> header = new HashMap<String, String>();
@@ -435,29 +494,28 @@ public class TranslateService {
         format.setTimeZone(TimeZone.getTimeZone("GMT"));
         Date dateD = new Date();
         String date = format.format(dateD);
-        System.out.println("【OTS WebAPI date】\n" + date);
+        log.info("【OTS WebAPI date】: {}", date);
 
         //对body进行sha256签名,生成digest头部，POST请求必须对body验证
         SecretKeySpec spec = new SecretKeySpec(body.getBytes(charset), "hmacsha256");
         mac.init(spec);
         String digestBase64 = "SHA-256=" + java.util.Base64.getEncoder().encodeToString(mac.doFinal());
-        System.out.println("【OTS WebAPI digestBase64】\n" + digestBase64);
+        log.info("【OTS WebAPI digestBase64】：{}", digestBase64);
 
         //hmacsha256加密原始字符串
         StringBuilder builder = new StringBuilder("host: ").append(url.getHost()).append("\n").//
                 append("date: ").append(date).append("\n").//
                 append("POST ").append(url.getPath()).append(" HTTP/1.1").append("\n").//
                 append("digest: ").append(digestBase64);
-        //System.out.println("【OTS WebAPI builder】\n" + builder);
         spec = new SecretKeySpec(apiSecret.getBytes(charset), "hmacsha256");
         mac.init(spec);
         byte[] hexDigits = mac.doFinal(builder.toString().getBytes(charset));
         String sha = java.util.Base64.getEncoder().encodeToString(hexDigits);
-        System.out.println("【OTS WebAPI sha】\n" + sha);
+        log.info("【OTS WebAPI sha】:{}", sha);
 
         //组装authorization
         String authorization = String.format("api_key=\"%s\", algorithm=\"%s\", headers=\"%s\", signature=\"%s\"", apiKey, "hmac-sha256", "host date request-line digest", sha);
-        System.out.println("【OTS WebAPI authorization】\n" + authorization);
+        log.info("【OTS WebAPI authorization】: {}", authorization);
 
         header.put("Authorization", authorization);
         header.put("Content-Type", "application/json");
@@ -465,36 +523,10 @@ public class TranslateService {
         header.put("Host", url.getHost());
         header.put("Date", date);
         header.put("Digest", digestBase64);
-        System.out.println("【OTS WebAPI header】\n" + header);
+        log.info("【OTS WebAPI header】: {}", header);
         return header;
     }
 
-    private String getAuthUrl(String hostUrl, String apiKey, String apiSecret) throws Exception {
-        URL url = new URL(hostUrl);
-        SimpleDateFormat format = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US);
-        format.setTimeZone(TimeZone.getTimeZone("GMT"));
-        String date = format.format(new Date());
-        StringBuilder builder = new StringBuilder("host: ").append(url.getHost()).append("\n").//
-                append("date: ").append(date).append("\n").//
-                append("GET ").append(url.getPath()).append(" HTTP/1.1");
-        System.out.println(builder);
-        Charset charset = Charset.forName("UTF-8");
-        Mac mac = Mac.getInstance("hmacsha256");
-        SecretKeySpec spec = new SecretKeySpec(apiSecret.getBytes(charset), "hmacsha256");
-        mac.init(spec);
-        byte[] hexDigits = mac.doFinal(builder.toString().getBytes(charset));
-        String sha = java.util.Base64.getEncoder().encodeToString(hexDigits);
-
-        System.out.println(sha);
-        String authorization = String.format("api_key=\"%s\", algorithm=\"%s\", headers=\"%s\", signature=\"%s\"", apiKey, "hmac-sha256", "host date request-line", sha);
-        System.out.println(authorization);
-        HttpUrl httpUrl = HttpUrl.parse("https://" + url.getHost() + url.getPath()).newBuilder().//
-                addQueryParameter("authorization", java.util.Base64.getEncoder().encodeToString(authorization.getBytes(charset))).//
-                addQueryParameter("date", date).//
-                addQueryParameter("host", url.getHost()).//
-                build();
-        return httpUrl.toString();
-    }
 
     private String uploadFile(MultipartFile file, String filePath) throws IOException {
         // 改个新名字
@@ -508,4 +540,147 @@ public class TranslateService {
 
         return FileUtil.save(filePath, fileName, file.getBytes());
     }
+
+    /**
+     * 白名单校验
+     *
+     * @param remoteIP
+     * @return
+     */
+    private boolean checkIp(String remoteIP) {
+        if (remoteIP == null || "".equals(remoteIP.trim())) {
+            log.error("remoteIp is null");
+            return true;
+        } else if (!remoteIP.matches(white_ips)) {
+            log.error("remoteIp: {} is not in whiteIps: {}", remoteIP, white_ips);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 翻译参数校验
+     *
+     * @param request
+     * @return
+     */
+    private boolean checkOTSRequestParam(TranslateTextRequest request) {
+        if (request == null) {
+            return true;
+        }
+        String appId = request.getAppId();
+        String userId = request.getUserId();
+        String from = request.getFrom();
+        String to = request.getTo();
+
+        if (appId == null || "".equals(appId.trim())) {
+            log.error("param from is null.");
+            return true;
+        } else if (userId == null || "".equals(userId.trim())) {
+            log.error("param userId is null.");
+            return true;
+        } else if (from == null || "".equals(from.trim())) {
+            log.error("param from is null.");
+            return true;
+        } else if (!from.matches("cn|en")) {
+            log.error("param from is not en or cn.");
+            return true;
+        } else if (to == null || "".equals(to.trim())) {
+            log.error("param to is null");
+            return true;
+        } else if (!to.matches("en|cn")) {
+            log.error("param to is not en or cn.");
+            return true;
+        } else if (from.equals(to)) {
+            log.error("param from == to.");
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 校验语音合成参数
+     *
+     * @param ttsRequest
+     * @return
+     */
+    private boolean checkTtsRequest(TtsRequest ttsRequest) {
+        if (ttsRequest == null) {
+            return true;
+        }
+
+        String appId = ttsRequest.getAppId();
+        String to = ttsRequest.getTo();
+        String ttsText = ttsRequest.getTtsText();
+        String userId = ttsRequest.getUserId();
+
+        if (appId == null || "".equals(appId.trim())) {
+            log.error("param from is null.");
+            return true;
+        } else if (to == null || "".equals(to.trim())) {
+            log.error("param to is null");
+            return true;
+        } else if (userId == null || "".equals(userId.trim())) {
+            log.error("param userId is null");
+            return true;
+        } else if (!to.matches("en|cn")) {
+            log.error("param to is not en or cn");
+            return true;
+        } else if (ttsText == null || "".equals(ttsText.trim())) {
+            log.error("param ttsText is null");
+            return true;
+        }
+        return false;
+
+    }
+
+    /**
+     * 语言与文本匹配校验
+     *
+     * @param from
+     * @param data
+     * @return
+     */
+    private boolean checkLanguage(String from, String data) {
+        if (data == null || "".equals(data.trim())) {
+            log.error("request param data is null.");
+            return true;
+        } else if ("cn".equals(from) && !StringUtil.isChinese(StringUtil.removePunctuation(data))) {
+            log.error("data is not match from");
+            return true;
+        } else if ("en".equals(from) && !StringUtil.isEnglish(StringUtil.removePunctuation(data))) {
+            log.error("data is not match from");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 语音识别参数校验
+     *
+     * @param file
+     * @param from
+     * @return
+     */
+    private boolean checkIATRequest(MultipartFile file, String from, String appId, String userId) {
+
+        if (appId == null || "".equals(appId.trim())) {
+            log.error("param from is null.");
+            return true;
+        } else if (from == null || "".equals(from.trim())) {
+            log.error("param from is null.");
+            return true;
+        } else if (!from.matches("cn|en")) {
+            log.error("param from is not en or cn.");
+            return true;
+        } else if (userId == null || "".equals(userId.trim())) {
+            log.error("userId is null.");
+            return true;
+        }
+
+        return false;
+    }
+
 }

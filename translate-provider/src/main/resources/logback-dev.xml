@@ -2,13 +2,13 @@
 <configuration debug="false">
 
     <!--定义日志文件的存储地址 勿在 LogBack 的配置中使用相对路径-->
-    <property name="LOG_HOME" value="/home/lingxicloud"/>
-
-    <Property name="cdr-directory-send" value="/home/lingxicloud/REPORT/send"/>
+    <property name="appName" value="localhost"/>
+    <property name="LOG_HOME" value="D:"/>
+    <Property name="cdr-directory-send" value="D:\\REPORT\\send"/>
     <Property name="file-suffix" value="%d{yyyyMMdd}"/>
     <Property name="pv-type" value="5L"/>
     <!-- 配置本机的IP地址，去掉.，每段不足三位的，前端补零 -->
-    <Property name="ipStr" value="192168177219"/>
+    <Property name="ipStr" value="127000000001"/>
     <!-- 应用端口号，不足五位的前端补零凑够五位 -->
     <Property name="portStr" value="08181"/>
 
@@ -30,7 +30,7 @@
     <appender name="ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <!--日志文件输出的文件名-->
-            <FileNamePattern>${LOG_HOME}/error-${file-suffix}.log</FileNamePattern>
+            <FileNamePattern>${LOG_HOME}\\logs\\error-${file-suffix}.log</FileNamePattern>
             <!--日志文件保留天数-->
             <MaxHistory>30</MaxHistory>
         </rollingPolicy>
@@ -51,7 +51,7 @@
     <appender name="CDR" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <!--日志文件输出的文件名-->
-            <FileNamePattern>${cdr-directory-send}/lingxicloud${ipStr}${portStr}${pv-type}%d{yyyyMMddHHmm}.txt
+            <FileNamePattern>${cdr-directory-send}/${appName}${ipStr}${portStr}${pv-type}%d{yyyyMMddHHmm}.txt
             </FileNamePattern>
             <!--日志文件保留天数-->
             <MaxHistory>30</MaxHistory>
@@ -76,13 +76,13 @@
     </root>
 
     <!--error日志-->
-    <logger name="com.wlf.translator" level="ERROR" additivity="false">
+    <logger name="com.lingxicloud.translateprovider" level="ERROR" additivity="false">
         <appender-ref ref="ERROR"/>
         <appender-ref ref="STDOUT"/>
     </logger>
 
     <!--话单-->
-    <logger name="com.wlf.translator.cdr" level="ERROR"
+    <logger name="com.lingxicloud.translateprovider.cdr" level="ERROR"
             additivity="false">
         <appender-ref ref="CDR"/>
     </logger>

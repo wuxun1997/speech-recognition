@@ -1,6 +1,6 @@
 package com.wlf.translateprovider.cdr;
 
-import com.wlf.translateprovider.javabean.TranslateCdr;
+import com.wlf.translateprovider.javabean.ots.TranslateCdr;
 
 public class CdrThreadLocal {
 
