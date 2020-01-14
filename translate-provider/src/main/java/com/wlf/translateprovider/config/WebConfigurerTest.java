@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-@Profile(value = "test")
+@Profile(value = "ceshi")
 @Configuration
 public class WebConfigurerTest implements WebMvcConfigurer {
     @Override
