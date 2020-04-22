@@ -91,7 +91,6 @@ public class TranslateService {
 
         // 记话单
         TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
-        translateCdr.setCdrType("1");
         translateCdr.setUserId(userId);
         translateCdr.setUserName(userName);
         translateCdr.setFrom(from);
@@ -158,7 +157,6 @@ public class TranslateService {
 
         // 记话单
         TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
-        translateCdr.setCdrType("4");
         translateCdr.setUserId(ttsRequest.getUserId());
         translateCdr.setTo(ttsRequest.getTo());
 
@@ -187,7 +185,6 @@ public class TranslateService {
 
         // 记话单
         TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
-        translateCdr.setCdrType("3");
         translateCdr.setFrom(from);
         translateCdr.setUserId(userId);
 
@@ -215,7 +212,6 @@ public class TranslateService {
 
         // 记话单
         TranslateCdr translateCdr = CdrThreadLocal.getTranslateCdr();
-        translateCdr.setCdrType("2");
         translateCdr.setUserId(request.getUserId());
         translateCdr.setUserName(request.getUserName());
         translateCdr.setFrom(request.getFrom());
