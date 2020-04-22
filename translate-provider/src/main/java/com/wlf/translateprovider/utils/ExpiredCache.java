@@ -71,13 +71,13 @@ public class ExpiredCache {
      * @param cacheKey
      * @param tts      缓存存活时间，单位秒
      */
-    public AtomicLong set(String cacheKey, long tts) {
+    public AtomicLong set(String cacheKey, long ttl) {
 
         CacheNode oldNode = cache.get(cacheKey);
         if (oldNode == null) {
             // 新创建缓存节点，失效时间=当前时间+缓存存活时间
             AtomicLong qps = new AtomicLong(1);
-            CacheNode newNode = new CacheNode(cacheKey, qps, System.currentTimeMillis() + tts * 1000);
+            CacheNode newNode = new CacheNode(cacheKey, qps, System.currentTimeMillis() + ttl * 1000);
             CacheNode tmp = cache.putIfAbsent(cacheKey, newNode);
 
             // 若缓存中已存在缓存节点，不需要更新过期时间，自增qps
